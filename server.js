@@ -1,59 +1,43 @@
 const express = require('express');
 const cors = require('cors');
-const axios = require('axios');
-require('dotenv').config();
+const { Groq } = require('groq-sdk');
 
 const app = express();
-
-// Middleware: Permite CORS para que el móvil y el PC conecten
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-// Ruta de comprobación (si entras desde el navegador verás esto)
-app.get('/', (req, res) => {
-    res.send('Servidor BI HUB AI está activo ✅');
-});
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-// Ruta principal para analizar el ADN.json
 app.post('/analyze', async (req, res) => {
-    const { suiteData, question } = req.body;
-
-    if (!suiteData || !question) {
-        return res.status(400).json({ error: "Faltan datos (ADN o Pregunta)" });
-    }
-
     try {
-        // Llamamos a Groq (Modelo Llama 3) por su alta velocidad y gratuidad
-        const response = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
-            model: "llama-3.3-70b-versatile",
+        const { suiteData, question } = req.body;
+        
+        // Creamos un contexto combinado de los 3 archivos
+        const contextoMaster = JSON.stringify(suiteData.adn || {});
+        const contextoForecast = JSON.stringify(suiteData.forecast || {});
+        const contextoEngine = JSON.stringify(suiteData.engine || {});
+
+        const completion = await groq.chat.completions.create({
             messages: [
                 { 
                     role: "system", 
-                    content: "Eres el Analista Senior de BI HUB. Analiza el JSON financiero y operativo del usuario y responde de forma técnica, precisa y en español." 
+                    content: `Eres un experto en BI. Tienes 3 fuentes de datos: 
+                    1. MASTER ADN (Realidad actual): ${contextoMaster}
+                    2. FORECAST (Proyecciones): ${contextoForecast}
+                    3. ENGINE (Operaciones): ${contextoEngine}
+                    Analiza de forma cruzada y responde de forma técnica y breve.` 
                 },
-                { 
-                    role: "user", 
-                    content: `CONTEXTO ADN: ${JSON.stringify(suiteData)}. PREGUNTA: ${question}` 
-                }
+                { role: "user", content: question }
             ],
-            temperature: 0.3
-        }, {
-            headers: {
-                'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-                'Content-Type': 'application/json'
-            }
+            model: "llama-3.3-70b-versatile", // Modelo actualizado
         });
 
-        // Enviamos la respuesta de la IA de vuelta al cliente
-        res.json({ answer: response.data.choices[0].message.content });
-
+        res.json({ answer: completion.choices[0].message.content });
     } catch (error) {
-        console.error("Error en la IA:", error.response?.data || error.message);
-        res.status(500).json({ error: "Error procesando la consulta con la IA." });
+        console.error("Error en la IA:", error);
+        res.status(500).json({ error: error.message });
     }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Servidor escuchando en puerto ${PORT}`);
-});
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => console.log(`Servidor BI activo en puerto ${PORT}`));
